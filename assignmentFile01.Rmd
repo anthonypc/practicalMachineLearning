@@ -1,0 +1,134 @@
+---
+title: "Practical Machine Learning"
+author: "Anthony Contoleon"
+date: "Sunday, July 26, 2015"
+output: html_document
+---
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+## Data 
+
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+# Data Loading
+
+The initial data is loaded and the training set is cleaned up to ensure that it is useful. Columns with far too many missing values and those of irrelevant data are removed.
+
+```{r}
+
+setwd("C://data//study//data")
+
+library(data.table)
+library(ggplot2)
+library(caret)
+library(rattle)
+
+## Collect the data
+## Working with the training set.
+training.raw <- read.csv("pml-training.csv", na.strings = c("NA",""), strip.white = TRUE)
+test.raw <- read.csv("pml-testing.csv", na.strings = c("NA",""), strip.white = TRUE)
+
+## Trim the columns that include more than 50% NA.
+training.trim <- training.raw[, colSums(is.na(training.raw)) < nrow(training.raw) * 0.5]
+
+## Remove irrelevant columns where the daata not related to performance.
+training.trim <- training.trim[, !names(training.trim) %like% 'timestamp' & !names(training.trim) %like% 'window' & !names(training.trim) %like% 'user_name' & !names(training.trim) == 'X']
+
+```
+
+## Additional Data Cleaning
+
+Highly correlated values are removed to reduce the impact of multicollinearity in the data used to generate the model.
+
+```{r}
+## Plot a correlation matrix for the values that remain.
+corrMatrix <- cor(na.omit(training.trim[sapply(training.trim, is.numeric)]))
+corrDF <- expand.grid(row = 1:52, col = 1:52)
+corrDF$correlation <- as.vector(corrMatrix)
+levelplot(correlation ~ row+ col, corrDF)
+
+## Dealing with correlation
+correlation <- findCorrelation(corrMatrix, cutoff = .90, verbose = TRUE)
+training.df <- training.trim[,-correlation]
+
+```
+
+The training data is split into two sets for testing and training.
+
+``` {r}
+## Create training set.
+training.df2 <- training.df
+training.df2[,1:45] <- lapply(training.df2[,1:45], as.numeric)
+inTraining <- createDataPartition(training.df2$classe, p = .75, list = FALSE)
+
+## Split numerics from the classe colume
+train.df <- training.df2[ inTraining,]
+testing.df  <- training.df2[-inTraining,]
+
+```
+
+# Decision Tree
+
+The first technique to be tried is a decision tree.
+
+```{r}
+
+## rpart decision tree
+set.seed(12345)
+rpartFit <- train(classe ~., method = "rpart", data = train.df)
+print(rpartFit$finalModel)
+
+plot(rpartFit$finalModel, main = "Rpart Classsification Tree")
+text(rpartFit$finalModel, cex = .8, pretty = TRUE)
+```
+
+The error rate for the decision tree with the variables included here is too high to be useful. This model has an accuracy that is far too low.
+
+``` {r}
+## Testing the model. it is not really all that great
+tree.pred <- predict(rpartFit,testing.df)
+tree.predMatrix <- with(testing.df, table(tree.pred,classe))
+sum(diag(tree.predMatrix))/sum(as.vector(tree.predMatrix)) # error rate
+confusionMatrix(tree.pred, testing.df$classe)
+```
+
+# Random Forests
+
+The random forest model is used next for creating a prediction model.
+
+```{r}
+##
+controlRF <- trainControl(method="oob",number = 10, repeats = 5, p = 0.75)
+rfFit <- train(classe ~ ., method="rf", data = train.df, trControl = controlRF)
+print(rfFit$finalModel)
+```
+
+The error rate for the decision tree is far worse than that of the random forest model.
+
+``` {r}
+## Testing the model. it is not really all that great
+rf.pred <- predict(rfFit,testing.df)
+rf.predMatrix <- with(testing.df, table(rf.pred,classe))
+sum(diag(rf.predMatrix))/sum(as.vector(rf.predMatrix)) # error rate
+confusionMatrix(rf.pred, testing.df$classe)
+```
+
+The final results for the prediction of the test model.
+
+```{r}
+## Final testing data from the model.
+
+rf.finTest <- predict(rfFit, test.raw)
+rf.finTest
+
+```
